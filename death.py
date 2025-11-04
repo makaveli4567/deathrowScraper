@@ -23,6 +23,27 @@ except Exception:
     PLAYWRIGHT_AVAILABLE = False
 
 app = Flask(__name__)
+from flask import Flask, request, render_template_string
+
+app = Flask(__name__)
+
+HTML = """
+<!doctype html>
+<title>Deathrow Scraper</title>
+<h1>It works 🎉</h1>
+<p>This is the web scraper service.</p>
+"""
+
+@app.route("/")
+def index():
+    return render_template_string(HTML)
+
+# If you have your existing scraper endpoints, keep them here.
+# Just ensure the Flask instance is named `app`.
+if __name__ == "__main__":
+    # Local run
+    app.run(host="0.0.0.0", port=5000)
+
 
 HTML_TMPL = """
 <!doctype html>
