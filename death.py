@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# ultra_scraper_app.py — Requests first, then Playwright fallback (with smart URL auto-fix)
+# app.py — Requests-first scraper with optional Playwright fallback
+# Run locally:  pip install -r requirements.txt && python app.py
 
 import csv
 import io
@@ -10,62 +11,18 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, request, render_template_string, send_file, redirect, url_for
+from flask import Flask, request, render_template_string, send_file, redirect, url_for, jsonify
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 
-from flask import Flask
-
 app = Flask(__name__)
 
-@app.get("/")
-def index():
-    return "DeathrowScraper is live 🧪"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
-# Optional browser fallback (Playwright)
-PLAYWRIGHT_AVAILABLE = False
+# -------- Optional Playwright fallback (only used if installed) --------
 try:
     from playwright.sync_api import sync_playwright
     PLAYWRIGHT_AVAILABLE = True
 except Exception:
     PLAYWRIGHT_AVAILABLE = False
-
-from flask import Flask
-
-app = Flask(__name__)
-
-@app.get("/")
-def index():
-    return "DeathrowScraper is live 🧪"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
-app = Flask(__name__)
-from flask import Flask, request, render_template_string
-
-app = Flask(__name__)
-
-HTML = """
-<!doctype html>
-<title>Deathrow Scraper</title>
-<h1>It works 🎉</h1>
-<p>This is the web scraper service.</p>
-"""
-
-@app.route("/")
-def index():
-    return render_template_string(HTML)
-
-# If you have your existing scraper endpoints, keep them here.
-# Just ensure the Flask instance is named `app`.
-if __name__ == "__main__":
-    # Local run
-    app.run(host="0.0.0.0", port=5000)
-
 
 HTML_TMPL = """
 <!doctype html>
@@ -93,7 +50,7 @@ HTML_TMPL = """
 </style>
 </head>
 <body>
-<center> <h1>DEATHROW GETS</h1> </center>
+<center><h1>DEATHROW GETS</h1></center>
 <form method="POST" action="{{ url_for('scrape') }}">
   <div class="grid">
     <div>
@@ -131,16 +88,12 @@ HTML_TMPL = """
     </div>
     <div>
       <label class="inline"><input type="checkbox" name="use_browser" value="1" {% if use_browser %}checked{% endif %}> Use headless browser fallback</label>
-      {% if not playwright_ok %}
-        <span class="badge">Playwright not installed</span>
-      {% else %}
-        <span class="badge">Playwright ready</span>
-      {% endif %}
+      {% if not playwright_ok %}<span class="badge">Playwright not installed</span>{% else %}<span class="badge">Playwright ready</span>{% endif %}
     </div>
   </div>
   <div class="row">
     <button class="btn" type="submit">Scrape</button>
-    <a class="badge" href="{{ url_for('index') }}">Reset</a>
+    <a class="badge" href="{{ url_for('home') }}">Reset</a>
   </div>
   <div class="muted">Tip: Paste messy URLs, I’ll auto-fix common issues (missing scheme, “wwwhttps”, slashes, etc.).</div>
 </form>
@@ -178,9 +131,7 @@ HTML_TMPL = """
 <div class="card">
   <h2>Links (same host highlighted)</h2>
   {% if result.links %}
-    <div class="row">
-      <a class="badge" href="{{ url_for('download_links') }}">Download Links CSV</a>
-    </div>
+    <div class="row"><a class="badge" href="{{ url_for('download_links') }}">Download Links CSV</a></div>
     <ul>
     {% for link in result.links %}
       <li>
@@ -217,9 +168,7 @@ HTML_TMPL = """
       <li><code>{{ m }}</code></li>
     {% endfor %}
     </ul>
-    {% if result.selector_matches|length > 100 %}
-      <p class="muted">Showing first 100 matches…</p>
-    {% endif %}
+    {% if result.selector_matches|length > 100 %}<p class="muted">Showing first 100 matches…</p>{% endif %}
   {% else %}
     <p class="muted">No matches for this selector.</p>
   {% endif %}
@@ -231,51 +180,26 @@ HTML_TMPL = """
 """
 
 _LAST_LINKS = []
-
 BROWSER_UAS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
 ]
 
-# ---------- URL Normalization ----------
-
+# -------- URL normalization --------
 def normalize_url(u: str) -> str:
-    """
-    Fix common user input mistakes:
-    - leading/trailing spaces
-    - 'wwwhttps://', 'https//', 'http//', 'http:/', 'https:/'
-    - missing scheme (assume https)
-    - accidental 'wwwhttps' domain (e.g., 'wwwhttps://site.com' -> 'https://site.com')
-    """
     if not u:
         return u
-    u = u.strip()
-
-    # Replace backslashes
-    u = u.replace("\\", "/")
-
-    # Fix malformed scheme slashes: http:/ -> http://, https:/ -> https://
-    u = re.sub(r'^(https?):/([^/])', r'\1://\2', u, flags=re.IGNORECASE)
-    u = re.sub(r'^(https?):///*', r'\1://', u, flags=re.IGNORECASE)
-
-    # Fix missing colon in scheme: https// -> https://, http// -> http://
-    u = re.sub(r'^(https?)(//)', r'\1://', u, flags=re.IGNORECASE)
-
-    # Remove 'www' accidentally glued before scheme: wwwhttps://example.com -> https://example.com
-    u = re.sub(r'^wwwhttps?://', 'https://', u, flags=re.IGNORECASE)
-
-    # If starts with 'www.' and no scheme, assume https
+    u = u.strip().replace("\\", "/")
+    u = re.sub(r'^(https?):/([^/])', r'\1://\2', u, flags=re.IGNORECASE)   # http:/ -> http://
+    u = re.sub(r'^(https?):///*', r'\1://', u, flags=re.IGNORECASE)        # http://// -> http://
+    u = re.sub(r'^(https?)(//)', r'\1://', u, flags=re.IGNORECASE)         # https// -> https://
+    u = re.sub(r'^wwwhttps?://', 'https://', u, flags=re.IGNORECASE)       # wwwhttps:// -> https://
     if re.match(r'^www\.', u, flags=re.IGNORECASE):
         u = 'https://' + u
-
-    # If no scheme at all, assume https
-    if not re.match(r'^[a-zA-Z][a-zA-Z0-9+\-.]*://', u):
+    if not re.match(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://', u):                    # <- dash escaped!
         u = 'https://' + u
-
-    # Final cleanup: collapse multiple slashes after scheme
     u = re.sub(r'^(https?://)/*', r'\1', u, flags=re.IGNORECASE)
-
     return u
 
 def is_valid_url(u: str) -> bool:
@@ -285,13 +209,11 @@ def is_valid_url(u: str) -> bool:
     except Exception:
         return False
 
-# ---------- Networking ----------
-
+# -------- Networking --------
 def make_session(proxy: str | None = None):
     s = requests.Session()
     retries = Retry(
-        total=3,
-        backoff_factor=0.6,
+        total=3, backoff_factor=0.6,
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=frozenset(["GET", "HEAD"]),
         raise_on_status=False,
@@ -319,7 +241,8 @@ def build_headers(user_agent: str, referer: str = "") -> dict:
         h["Referer"] = referer
     return h
 
-def polite_get(url: str, user_agent: str = "", delay: float = 1.0, timeout: int = 20, referer: str = "", prime_cookies: bool = False, proxy: str | None = None):
+def polite_get(url: str, user_agent: str = "", delay: float = 1.0, timeout: int = 20,
+               referer: str = "", prime_cookies: bool = False, proxy: str | None = None):
     time.sleep(max(0.0, delay))
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
@@ -335,6 +258,7 @@ def polite_get(url: str, user_agent: str = "", delay: float = 1.0, timeout: int 
 
     resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
     if resp.status_code == 403:
+        # soften retries with different UA/referer
         headers = build_headers(user_agent="", referer="")
         time.sleep(0.5)
         resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
@@ -344,32 +268,29 @@ def polite_get(url: str, user_agent: str = "", delay: float = 1.0, timeout: int 
             resp = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
     return resp
 
-def browser_get(url: str, user_agent: str = "", timeout: int = 60, referer: str = "", proxy: str | None = None, selector: str | None = None):
+def browser_get(url: str, user_agent: str = "", timeout: int = 60, referer: str = "",
+                proxy: str | None = None, selector: str | None = None):
     if not PLAYWRIGHT_AVAILABLE:
-        raise RuntimeError("Playwright is not installed. Run: pip install playwright && playwright install chromium")
-
-    # Drop hash fragments that can stall loads
+        raise RuntimeError("Playwright is not installed. Run: pip install playwright && python -m playwright install chromium")
     if "#" in url:
         url = url.split("#", 1)[0]
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
-        context_args = {
+        ctx_args = {
             "viewport": {"width": 1366, "height": 768},
             "java_script_enabled": True,
             "timezone_id": "Africa/Nairobi",
             "locale": "en-US",
         }
         if proxy:
-            context_args["proxy"] = {"server": proxy}
+            ctx_args["proxy"] = {"server": proxy}
         if user_agent:
-            context_args["user_agent"] = user_agent
-        context = browser.new_context(**context_args)
-        context.add_init_script("""Object.defineProperty(navigator, 'webdriver', {get: () => undefined});""")
+            ctx_args["user_agent"] = user_agent
+        ctx = browser.new_context(**ctx_args)
+        ctx.add_init_script("""Object.defineProperty(navigator, 'webdriver', {get: () => undefined});""")
+        page = ctx.new_page()
 
-        page = context.new_page()
-
-        # Block heavy resources to reduce timeouts
         def _route_block(route):
             r = route.request
             if r.resource_type in ("image", "media", "font", "stylesheet"):
@@ -381,8 +302,6 @@ def browser_get(url: str, user_agent: str = "", timeout: int = 60, referer: str 
             page.set_extra_http_headers({"Referer": referer, "Accept-Language": "en-US,en;q=0.9"})
 
         page.set_default_timeout(timeout * 1000)
-
-        # Use domcontentloaded + brief load wait; avoid 'networkidle'
         page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
         try:
             page.wait_for_load_state("load", timeout=int(timeout * 0.5) * 1000)
@@ -409,12 +328,11 @@ def browser_get(url: str, user_agent: str = "", timeout: int = 60, referer: str 
             text = html
             url = final_url
             ok = True
-        context.close()
+        ctx.close()
         browser.close()
         return R()
 
-# ---------- Parsing ----------
-
+# -------- Parsing --------
 def extract_summary(html: str, base_url: str):
     soup = BeautifulSoup(html, "html.parser")
     title = soup.title.get_text(strip=True) if soup.title else ""
@@ -440,30 +358,28 @@ def extract_summary(html: str, base_url: str):
         images.append({"src": src, "alt": alt})
     return title, meta_description, headings, links, images
 
-# ---------- Routes ----------
-
+# -------- Routes --------
 @app.route("/", methods=["GET"])
-def index():
+def home():
     return render_template_string(HTML_TMPL, playwright_ok=PLAYWRIGHT_AVAILABLE)
 
 @app.route("/scrape", methods=["POST"])
 def scrape():
     global _LAST_LINKS
     _LAST_LINKS = []
-    raw_url = request.form.get("url", "").strip()
-    selector = request.form.get("selector", "").strip()
-    delay_raw = request.form.get("delay", "1").strip()
-    user_agent = request.form.get("user_agent", "").strip()
-    referer = request.form.get("referer", "").strip()
-    proxy = request.form.get("proxy", "").strip() or None
+
+    raw_url = (request.form.get("url") or "").strip()
+    selector = (request.form.get("selector") or "").strip()
+    delay_raw = (request.form.get("delay") or "1").strip()
+    user_agent = (request.form.get("user_agent") or "").strip()
+    referer = (request.form.get("referer") or "").strip()
+    proxy = (request.form.get("proxy") or "").strip() or None
     prime_cookies = request.form.get("prime_cookies") == "1"
     use_browser = request.form.get("use_browser") == "1"
 
-    # AUTO-FIX URL
     url = normalize_url(raw_url)
-
     if not is_valid_url(url):
-        error = f"Please provide a valid URL. You entered: “{raw_url}”. Try something like: https://www.maseno.ac.ke"
+        error = f"Please provide a valid URL. You entered: “{raw_url}”."
         return render_template_string(HTML_TMPL, error=error, url=raw_url, selector=selector, playwright_ok=PLAYWRIGHT_AVAILABLE)
 
     try:
@@ -472,31 +388,36 @@ def scrape():
         delay = 1.0
 
     try:
-        # Try requests first
+        # 1) Try requests first
         resp = polite_get(url, user_agent=user_agent, delay=delay, referer=referer,
                           prime_cookies=prime_cookies, proxy=proxy)
         method_used = "requests"
 
-        # Auto-fallback to browser if blocked or tiny HTML
-        if (not resp.ok or resp.status_code in (401, 403) or (resp.ok and len((resp.text or "").strip()) < 500)):
-            if PLAYWRIGHT_AVAILABLE and (use_browser or True):
-                resp = browser_get(url, user_agent=user_agent or random.choice(BROWSER_UAS),
-                                   timeout=75, referer=referer, proxy=proxy,
-                                   selector=selector if selector else None)
+        # 2) If blocked and user enabled fallback, try Playwright
+        need_browser = (not resp.ok) or (resp.status_code in (401, 403)) or (resp.ok and len((resp.text or "").strip()) < 500)
+        if need_browser and use_browser:
+            if PLAYWRIGHT_AVAILABLE:
+                resp = browser_get(
+                    url,
+                    user_agent=user_agent or random.choice(BROWSER_UAS),
+                    timeout=75,
+                    referer=referer,
+                    proxy=proxy,
+                    selector=selector if selector else None
+                )
                 method_used = "playwright"
             else:
-                error = ("Request failed with status {} and browser fallback not available. "
-                         "Run: pip install playwright && python -m playwright install chromium"
-                         ).format(getattr(resp, "status_code", "unknown"))
+                error = ("Request blocked and browser fallback not available. "
+                         "Run: pip install playwright && python -m playwright install chromium")
                 return render_template_string(
                     HTML_TMPL, error=error, url=url, selector=selector,
                     delay=delay, user_agent=user_agent, referer=referer, proxy=proxy,
-                    prime_cookies=prime_cookies, use_browser=True, playwright_ok=PLAYWRIGHT_AVAILABLE
+                    prime_cookies=prime_cookies, use_browser=use_browser, playwright_ok=PLAYWRIGHT_AVAILABLE
                 )
 
         content_type = resp.headers.get("Content-Type", "")
         if not resp.ok:
-            error = f"Request failed with status {resp.status_code}. Try another User-Agent/Referer, a proxy, or headless browser."
+            error = f"Request failed with status {resp.status_code}. Try different UA/Referer, a proxy, or enable headless browser."
             return render_template_string(
                 HTML_TMPL, error=error, url=url, selector=selector, delay=delay,
                 user_agent=user_agent, referer=referer, proxy=proxy,
@@ -514,81 +435,115 @@ def scrape():
             selector_matches = []
             for el in found:
                 text = el.get_text(" ", strip=True)
-                if not text:
-                    html_snippet = re.sub(r"\s+", " ", str(el))[:500]
-                    selector_matches.append(html_snippet)
-                else:
-                    selector_matches.append(text)
+                selector_matches.append(text if text else re.sub(r"\s+", " ", str(el))[:500])
 
-        result = type(
-            "Res",
-            (),
-            dict(
-                status_code=getattr(resp, "status_code", 200),
-                content_type=content_type,
-                final_url=resp.url,
-                title=title,
-                meta_description=meta_desc,
-                headings=headings,
-                links=links,
-                images=images,
-                selector=selector,
-                selector_matches=selector_matches,
-                method_used=method_used,
-            ),
-        )
-        return render_template_string(
-            HTML_TMPL,
-            result=result,
-            url=url,
-            selector=selector,
-            delay=delay,
-            user_agent=user_agent,
-            referer=referer,
-            proxy=proxy,
-            prime_cookies=prime_cookies,
-            use_browser=use_browser,
-            playwright_ok=PLAYWRIGHT_AVAILABLE,
-        )
+        result = {
+            "status_code": getattr(resp, "status_code", 200),
+            "content_type": content_type,
+            "final_url": resp.url,
+            "title": title,
+            "meta_description": meta_desc,
+            "headings": headings,
+            "links": links,
+            "images": images,
+            "selector": selector,
+            "selector_matches": selector_matches,
+            "method_used": method_used,
+        }
+
+        return render_template_string(HTML_TMPL,
+            result=result, url=url, selector=selector, delay=delay,
+            user_agent=user_agent, referer=referer, proxy=proxy,
+            prime_cookies=prime_cookies, use_browser=use_browser,
+            playwright_ok=PLAYWRIGHT_AVAILABLE)
     except requests.RequestException as e:
         error = f"Network error: {e}"
     except Exception as e:
         error = f"Unexpected error: {e}"
 
-    return render_template_string(
-        HTML_TMPL,
-        error=error,
-        url=url,
-        selector=selector,
-        delay=delay,
-        user_agent=user_agent,
-        referer=referer,
-        proxy=proxy,
-        prime_cookies=prime_cookies,
-        use_browser=use_browser,
-        playwright_ok=PLAYWRIGHT_AVAILABLE,
-    )
+    return render_template_string(HTML_TMPL,
+        error=error, url=url, selector=selector, delay=delay,
+        user_agent=user_agent, referer=referer, proxy=proxy,
+        prime_cookies=prime_cookies, use_browser=use_browser,
+        playwright_ok=PLAYWRIGHT_AVAILABLE)
 
 @app.route("/download-links.csv", methods=["GET"])
 def download_links():
     global _LAST_LINKS
     if not _LAST_LINKS:
-        return redirect(url_for("index"))
+        return redirect(url_for("home"))
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["text", "href", "same_host"])
     for l in _LAST_LINKS:
         writer.writerow([l.get("text", ""), l.get("href", ""), l.get("same_host", False)])
     output.seek(0)
-    return send_file(
-        io.BytesIO(output.getvalue().encode("utf-8")),
-        mimetype="text/csv",
-        as_attachment=True,
-        download_name="links.csv",
-    )
+    return send_file(io.BytesIO(output.getvalue().encode("utf-8")),
+                     mimetype="text/csv", as_attachment=True,
+                     download_name="links.csv")
+
+# ---- Simple JSON API ----
+@app.post("/api/scrape")
+def api_scrape():
+    payload = request.get_json(force=True, silent=True) or {}
+    raw_url = (payload.get("url") or "").strip()
+    selector = (payload.get("selector") or "").strip()
+    use_browser = bool(payload.get("use_browser", False))
+    user_agent = (payload.get("user_agent") or "").strip()
+    referer = (payload.get("referer") or "").strip()
+    proxy = (payload.get("proxy") or "").strip() or None
+    prime_cookies = bool(payload.get("prime_cookies", False))
+    delay = float(payload.get("delay", 1.0))
+
+    url = normalize_url(raw_url)
+    if not is_valid_url(url):
+        return jsonify({"error": "invalid_url", "input": raw_url}), 400
+
+    try:
+        resp = polite_get(url, user_agent=user_agent, delay=delay, referer=referer,
+                          prime_cookies=prime_cookies, proxy=proxy)
+        method = "requests"
+        need_browser = (not resp.ok) or (resp.status_code in (401, 403)) or (resp.ok and len((resp.text or "").strip()) < 500)
+        if need_browser and use_browser:
+            if not PLAYWRIGHT_AVAILABLE:
+                return jsonify({"error": "playwright_not_installed"}), 503
+            resp = browser_get(url, user_agent=user_agent or random.choice(BROWSER_UAS),
+                               timeout=75, referer=referer, proxy=proxy, selector=selector or None)
+            method = "playwright"
+
+        if not resp.ok:
+            return jsonify({"error": "http_error", "status": resp.status_code}), resp.status_code
+
+        title, meta_desc, headings, links, images = extract_summary(resp.text, resp.url)
+
+        selector_matches = None
+        if selector:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            found = soup.select(selector)
+            selector_matches = []
+            for el in found:
+                text = el.get_text(" ", strip=True)
+                selector_matches.append(text if text else re.sub(r"\s+", " ", str(el))[:500])
+
+        return jsonify({
+            "final_url": resp.url,
+            "status_code": getattr(resp, "status_code", 200),
+            "content_type": resp.headers.get("Content-Type", ""),
+            "title": title,
+            "meta_description": meta_desc,
+            "headings": headings,
+            "links": links,
+            "images": images,
+            "selector": selector,
+            "selector_matches": selector_matches,
+            "method_used": method,
+        })
+    except Exception as e:
+        return jsonify({"error": "unexpected", "message": str(e)}), 500
+
+@app.get("/health")
+def health():
+    return "ok", 200
 
 if __name__ == "__main__":
-    # Requirements:
-    #   pip install flask requests beautifulsoup4 urllib3
-    #   (optional) pip install playwright && playwright install chromium
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)

@@ -1,0 +1,194 @@
+DEATHR0W Web Scraper — README
+
+A simple-but-powerful web-scraping web app. It tries Requests + BeautifulSoup first (fast/light), and if a site blocks bots or needs JavaScript, it auto-falls back to a headless browser (Playwright/Chromium) to render and extract.
+
+What it’s for
+
+Quickly inspect any webpage: title, meta description, headings, links, images.
+
+Test CSS selectors live to grab specific content (e.g., .price, article h2, #content p).
+
+Bypass basic bot blocks: random User-Agents, Referer support, cookie priming, and (optionally) headless browser rendering.
+
+Export links to CSV for downstream crawling.
+
+Perfect for content discovery, prototyping scrapers, and debugging selectors before you write a full crawler.
+
+Key features
+
+URL Auto-Fixer: cleans messy inputs like wwwhttps://…, https//…, or plain example.com → becomes a valid https://example.com.
+
+Fast → Smart pipeline:
+
+Requests + BS4;
+
+If blocked/empty HTML, auto-fallback to Playwright (can block heavy assets to speed up).
+
+Headers control: custom User-Agent and Referer fields.
+
+Cookie priming: hit site root first to get cookies before the target page.
+
+Proxy support: http://user:pass@host:port.
+
+Selector tester: return text/HTML snippets of matched nodes (first 100).
+
+CSV export: download all discovered links.
+
+Quick start
+1) Install dependencies
+pip install flask requests beautifulsoup4 urllib3
+# Optional for JS-heavy sites:
+pip install playwright
+python -m playwright install chromium
+
+2) Run
+python ultra_scraper_app.py
+
+
+Open: http://127.0.0.1:5000
+
+How to use
+
+Enter a URL
+Paste any URL (even messy ones); the app auto-normalizes to a valid https://….
+
+(Optional) CSS selector
+Example selectors:
+
+All headings: h1, h2, h3
+
+Article paragraphs: article p
+
+Price blocks: .price or [data-test="price"]
+
+(Optional) Advanced inputs
+
+Polite Delay: add 0.5–2s between requests.
+
+User-Agent: leave blank to auto-rotate, or supply your own.
+
+Referer: try the site’s homepage (e.g., https://jumia.co.ke) to reduce 403s.
+
+Proxy: http://user:pass@host:port
+
+Prime cookies: tick it to visit the origin once before the target page.
+
+Use headless browser fallback: for JS-heavy or protected pages.
+
+Submit
+You’ll see:
+
+Page title & meta description
+
+Headings H1–H3
+
+Links (same-host highlighted) + Download links CSV
+
+Images (src + alt)
+
+Selector matches (first 100)
+
+Typical workflows
+
+Find all product URLs from a category page
+
+Paste category URL
+
+Selector: a.product-link (or the site’s specific class)
+
+Download links.csv
+
+Extract a price block
+
+Paste product URL
+
+Try selectors like .price, .amount, or span[data-price]
+
+Troubleshoot a bot block
+
+Set Referer to the homepage
+
+Tick Prime cookies
+
+Provide a realistic User-Agent
+
+Enable Use headless browser fallback
+
+If still blocked, add a residential Proxy
+
+Troubleshooting
+
+403 Forbidden
+Add Referer, switch User-Agent, tick Prime cookies, turn on Headless browser, or use a proxy.
+
+Timeout (Playwright goto)
+The updated app avoids networkidle and uses smarter waits. Still timing out?
+
+Increase timeout by using headless fallback (auto-set higher internally)
+
+Ensure your network is stable / not blocking the site
+
+Use a proxy closer to the site’s region
+
+“wwwhttps” / bad URL
+Fixed by the URL Auto-Fixer. If you still see errors, paste a clean URL like https://www.maseno.ac.ke.
+
+Empty selector results
+Open devtools (in your browser), inspect the page, copy exact selectors, and retry. Some pages render content after scroll; with fallback enabled the app scrolls a bit to trigger lazy load.
+
+Security & ethics (important)
+
+Respect terms & robots of target sites you own or have permission to scrape.
+
+Don’t overload servers: keep delays reasonable and avoid aggressive crawling from this UI.
+
+Don’t scrape personal/sensitive data without explicit consent.
+
+Comply with local laws and the target site’s policies.
+
+This app disables robots enforcement by default for debugging convenience. Be responsible.
+
+Limitations
+
+It’s a single-page inspector, not a full crawler.
+
+Heavy anti-bot systems (WAFs, device fingerprints) may still block you.
+
+Login flows require custom steps (can be scripted with Playwright, see roadmap).
+
+Roadmap (say the word and I’ll add)
+
+Save page data as JSON/CSV (title, meta, links, images, selector matches).
+
+Sitemap mode: read /sitemap.xml, queue URLs, paginate.
+
+Next-page selector to auto follow pagination and collect results.
+
+Proxy rotation & UA rotation pools.
+
+SQLite export (one click).
+
+Login/Click flows: record Playwright steps to sign in or click buttons before extraction.
+
+Dockerfile for easy deployment.
+
+FAQ
+
+Q: Can it scrape “any” site?
+A: It tries. Many will work with requests; others need Playwright. Some advanced anti-bot setups will require good proxies and tuning.
+
+Q: Where are results stored?
+A: In-memory for the current session. Links can be downloaded as CSV. (We can add file exports for full page data.)
+
+Q: Will it violate a site’s policy?
+A: You are responsible for obeying all applicable terms, laws, and ethical guidelines.
+
+Tech stack
+
+Flask (UI)
+
+Requests + BeautifulSoup (fast parse)
+
+Playwright/Chromium (fallback JS rendering)
+
+URL normalizer to fix common input errors
