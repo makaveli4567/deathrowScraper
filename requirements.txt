@@ -12,3 +12,5 @@ python-dotenv
 trafilatura
 readability-lxml
 sentry-sdk
+gunicorn==21.2.0
+
