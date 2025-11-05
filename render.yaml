@@ -3,6 +3,16 @@ services:
     name: deathrow-scraper
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn death:app --bind 0.0.0.0:$PORT
-    autoDeploy: true
+    region: oregon
+    buildCommand: |
+      pip install -r requirements.txt
+      python -m playwright install --with-deps chromium
+    startCommand: gunicorn -w 2 --threads 8 -b 0.0.0.0:$PORT app:app
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
+      # optional: to avoid Playwright by default
+      # - key: USE_PLAYWRIGHT
+      #   value: "0"
