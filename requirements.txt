@@ -13,4 +13,13 @@ trafilatura
 readability-lxml
 sentry-sdk
 gunicorn==21.2.0
+flask
+gunicorn
+requests
+beautifulsoup4
+urllib3
+cloudscraper
+httpx
+curl-cffi
+playwright
 

@@ -7,12 +7,14 @@ services:
     buildCommand: |
       pip install -r requirements.txt
       python -m playwright install --with-deps chromium
-    startCommand: gunicorn -w 2 --threads 8 -b 0.0.0.0:$PORT app:app
+    startCommand: gunicorn -w 1 --threads 8 -b 0.0.0.0:$PORT app:app
     envVars:
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: "0"
-      # optional: to avoid Playwright by default
-      # - key: USE_PLAYWRIGHT
-      #   value: "0"
+      # Optional: default to requests-mode unless the user ticks “Use headless browser”
+      - key: USE_PLAYWRIGHT
+        value: "0"
+    healthCheckPath: /health
+
