@@ -3,18 +3,19 @@ services:
     name: deathrow-scraper
     env: python
     plan: free
-    region: oregon
     buildCommand: |
+      pip install --upgrade pip
       pip install -r requirements.txt
+      # Download Chromium for Playwright on Render
       python -m playwright install --with-deps chromium
-    startCommand: gunicorn -w 1 --threads 8 -b 0.0.0.0:$PORT app:app
+    startCommand: gunicorn death:app --bind 0.0.0.0:$PORT --workers=2 --threads=4 --timeout=180
     envVars:
-      - key: PYTHONUNBUFFERED
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: PIP_NO_CACHE_DIR
         value: "1"
       - key: PLAYWRIGHT_BROWSERS_PATH
-        value: "0"
-      # Optional: default to requests-mode unless the user ticks “Use headless browser”
-      - key: USE_PLAYWRIGHT
-        value: "0"
-    healthCheckPath: /health
+        value: /opt/render/.cache/ms-playwright
+
+
 
